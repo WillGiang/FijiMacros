@@ -1,6 +1,6 @@
 /*
- * 2023-05-11 William Giang
- * Macro to XOR ROI combos and measure mean intensity 
+ * 2023-06-06 William Giang
+ * Macro to XOR ROI combos and measure mean intensity and area
  * Originally made to compare peripheral and perinuclear ER for Sonam
  */
 
@@ -14,7 +14,7 @@
 
 setBatchMode(true);
 run("Set Measurements...", "area mean integrated display redirect=None decimal=3");
-table_name = "Table1";
+table_name = cell_line + "_" + bio_rep + "_ch" + desired_measurement_channel + ".csv";
 Table.create(table_name);
 
 processFolder(input);
@@ -43,7 +43,7 @@ function XOR_and_measure_ROIs(desired_ROI_type, cell_ROI_iter, nuclear_ROI_iter,
 
 	roiManager("XOR");
 	run("Measure");
-	
+	roi_area 	   = getResult("Area", nResults - 1);
 	mean_intensity = getResult("Mean", nResults - 1);
 	corrected_mean_intensity = mean_intensity - num_to_subtract;
 
@@ -60,6 +60,7 @@ function XOR_and_measure_ROIs(desired_ROI_type, cell_ROI_iter, nuclear_ROI_iter,
 	Table.set("Biological_Replicate", table_row, bio_rep);
 	Table.set("Measured_Channel", table_row, desired_measurement_channel);
 	Table.set("Corrected_Mean_Intensity_" + desired_ROI_type, table_row, corrected_mean_intensity);
+	Table.set("Area_" + desired_ROI_type, table_row, roi_area);
 	Table.update;
 }
 
@@ -101,13 +102,12 @@ function processFile(input, output, file) {
 
 // Save Table data
 selectWindow(table_name);
-csv_name = cell_line + "_" + bio_rep + ".csv";
-saveAs("Results", output + File.separator + csv_name);
+saveAs("Results", output + File.separator + table_name);
 
 // Close everything
 close("*");
 close("Results");
-close(csv_name);
+close(table_name);
 //print("Done");
 
 setBatchMode(false);
