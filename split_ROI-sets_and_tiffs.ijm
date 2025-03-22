@@ -8,8 +8,9 @@
 #@ File (label = "Output ROI directory", style = "directory") output
 #@ String (label = "File suffix", value = ".tif") suffix
 
-
+setBatchMode(true);
 processFolder(input);
+setBatchMode(false);
 
 // function to scan folders/subfolders/files to find files with correct suffix
 function processFolder(input) {
