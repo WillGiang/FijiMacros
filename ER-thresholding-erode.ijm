@@ -18,7 +18,7 @@
 #@ File (label = "Input fluorescence directory", style = "directory") input
 #@ File (label = "Input segmentation images", style = "directory") input_seg
 #@ File (label="Choose directory for creating result folders (one level above input data dir?)", style = "directory") output
-
+#@ Integer (label = "Iterations of erosion", value = 4) n_erosions
 #@ String (label = "File suffix", value = ".tif") suffix
 
 setBatchMode(true);
