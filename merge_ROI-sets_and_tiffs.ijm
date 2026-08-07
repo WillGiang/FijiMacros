@@ -1,19 +1,21 @@
 /*
- * 2026-08-06 William Giang
+ * 2026-08-07 William Giang
  * 
  * Macro to add the ROIs in .zip (or single ROI in .roi) 
  * to associated image and re-save 
  * with the goal of simplifying future macros.
  * 
- * 2026-08-06 : 
+ * 2026-08-07
+ * - only save if there's an associated ROI file
+ * 2026-08-06
  * - added functionality for individual ROI files
  * - added logging/warning for files without associated ROIs
  */
 
-#@ File (label = "Input directory", style = "directory") input
-#@ File (label = "Input ROI directory", style = "directory") input_ROI_dir
-#@ File (label = "Output directory", style = "directory") output
-#@ String (label = "File suffix", value = ".tif") suffix
+#@ File (label = "Input directory for .tif files", style = "directory") input
+#@ File (label = "Input directory for ROI(s)", style = "directory") input_ROI_dir
+#@ File (label = "Output directory for .tifs with ROI(s)", style = "directory") output
+#@ String (label = "Input image suffix", value = ".tif") suffix
 
 setBatchMode(true);
 processFolder(input);
@@ -64,8 +66,10 @@ function processFile(input, output, file) {
 	
 	selectWindow(title_orig);
 	
-	saveAs("tiff", output + File.separator + title_orig);
-
+	if (multiple_ROI_exists || single_ROI_exists) {
+		saveAs("tiff", output + File.separator + title_orig);
+	}
+	
 	close("*");
 }
 print("Done");
