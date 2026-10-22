@@ -55,41 +55,26 @@ processFolder(input);
 
 setBatchMode(false);
 
-// function to open and process (erode) a segmentation image and return names of processed images
-function process_segmentation(seg_img_path) {
-	
-	// Open segmentation file
-	// Simple segmentation files are likely either saved as .h5 or .tif 
-	if (endsWith(seg_img_path, ".h5") == true) {
-		run("Import HDF5", "select=" + seg_img_path + " datasetname=/exported_data axisorder=yxc");
-	}
-	else {
-		run("Bio-Formats Importer", "open=" + seg_img_path + " color_mode=Default view=Hyperstack stack_order=XYCZT");
-	}
-	
-	orig_seg_img_id = getImageID();
+// function to process (erode) a segmentation image and return names of processed images
+function process_segmentation(seg_img_id, n_erosions) {
+	selectImage(seg_img_id);
 	
 	// get the number of channels and frames (time points)
-	getDimensions(_, _, nChannels, slices, nFrames);
-	
-	// If 3D, do a max intensity projection
-	//if (slices > 1){
-	//	selectImage(orig_seg_img_id);
-	//	run("Z Project...", "projection=[Max Intensity] all");
-	//}
-	
-	// Threshold for ER and convert to binary mask
-	seg_img_id = getImageID();
-	selectImage(seg_img_id);
+	//getDimensions(_, _, nChannels, slices, nFrames);
+
 	run("Duplicate...", "title=ER-prob duplicate channels=2");
 	
+	// Threshold for ER and convert to binary mask
 	setThreshold(ER_prob_threshold, 1e30, "raw");
 	run("Convert to Mask", "background=Dark black create");
 	seg_img_mask_name = getTitle();
+	selectImage(seg_img_mask_name);
 	run("Duplicate...", "title=eroded duplicate");
 	
+	selectImage("eroded");
+	
 	// Erode away tubules
-	run("Options...", "iterations=" + n_erosions + " count=1 black do=Erode");
+	run("Options...", "iterations=&n_erosions count=1 black do=Erode");
 	seg_img_mask_eroded_name = getTitle();
 	
 	array_with_seg_mask_and_eroded_seg_mask = newArray(seg_img_mask_name, seg_img_mask_eroded_name);
@@ -106,10 +91,10 @@ function process_fluorescence(img_id){
 	}
 	
 	// If 3D, do a max intensity projection
-	if (slices > 1){
-		selectImage(id);
-		run("Z Project...", "projection=[Max Intensity] all");
-	}
+	//if (slices > 1){
+	//	selectImage(img_id);
+	//	run("Z Project...", "projection=[Max Intensity] all");
+	//}
 	
 	run("Enhance Contrast", "saturated=0.35");
 	run("8-bit");
@@ -130,6 +115,25 @@ function measureNonZeroPixels(img_id){
 	return(nPixels);
 }
 
+function measureROIs(img_id, pixel_count_name) {
+	selectImage(img_id);
+	
+	getPixelSize(unit, pixelWidth, pixelHeight);
+	run("Set Measurements...", "area min area_fraction stack limit display redirect=None decimal=3");
+
+	setThreshold(1, 255, "raw");
+	
+	roiManager("Deselect");
+	selectImage(img_id);
+	roiManager("Measure");
+
+	for (i=0; i < nResults; i++) {
+		pxCount = round(getResult("Area", i)/(pixelWidth*pixelHeight));
+		//setResult("PixelCount_mask", i, pxCount);
+		setResult(pixel_count_name, i, pxCount);
+	}
+}
+
 // function to scan folders/subfolders/files to find files with correct suffix
 function processFolder(input) {
 	list = getFileList(input);
@@ -144,39 +148,110 @@ function processFolder(input) {
 }
 
 function processFile(input, output, file) {
+	// Clear results table and empty the ROI Manager
 	run("Clear Results");
+	roiManager("reset");
 	
+	// -- Open and process fluorescence file --- 
 	print(file);
-	run("Bio-Formats Importer", "open="+ input + File.separator + list[i] + " color_mode=Default view=Hyperstack stack_order=XYCZT");
-
+	open(input+File.separator+list[i]);
 	orig_name = File.nameWithoutExtension;
 	orig_img_id = getImageID();
 	original = getTitle();
+	getDimensions(_, _, nChannels, number_of_slices, nFrames);
+	
+	// Add the ROIs from the fluorescence tif to the ROI Manager
+	run("To ROI Manager");
 	
 	fl_8bit_name = process_fluorescence(orig_img_id);
 	
+	// --- Open segmentation file ---
 	seg_img_path = input_seg + File.separator + orig_name + "_Probabilities.h5";
-	seg_name_array = process_segmentation(seg_img_path);
+	
+	// Segmentation files are likely either saved as .h5 or .tif 
+	if (endsWith(seg_img_path, ".h5") == true) {
+		if (number_of_slices == 1) {
+			axisorder = "yxc"; // double-check this?
+		}
+		else {
+			axisorder = "tzyxc";
+		}
+
+		run("Import HDF5", "select="+seg_img_path+" datasetname=/exported_data axisorder="+axisorder);
+	}
+	else {
+		run("Bio-Formats Importer", "open=&seg_img_path color_mode=Default view=Hyperstack stack_order=XYCZT");
+	}
+	
+	seg_img_id = getImageID();
+	
+	// --- Process segmentation ---
+	
+	seg_name_array = process_segmentation(seg_img_id, n_erosions);
 	
 	mask_name = seg_name_array[0];
 	mask_eroded_name = seg_name_array[1];
 	
-	nPixels_mask = measureNonZeroPixels(mask_name);
-	nPixels_mask_eroded = measureNonZeroPixels(mask_eroded_name);
+	mask_table = "Results_mask";
+	final_table = "Results";
 	
-	totalPixels = getWidth() * getHeight();
+	pxCount_mask   = "PixelCount_mask";
+	pxCount_eroded = "PixelCount_eroded";
+	
+	// --- Measure ROIs
+	measureROIs(mask_name, pxCount_mask);
+	IJ.renameResults("Results", mask_table);
+	measureROIs(mask_eroded_name, pxCount_eroded);
+	
+	// Copy the pixel count from one table to the other
+	mask_pixel_count = Table.getColumn(pxCount_mask, mask_table);
+	Table.setColumn(pxCount_mask, mask_pixel_count, final_table);
+	
+	//Table.deleteColumn("Area", final_table);
+	Table.deleteColumn("%Area", final_table);
+	
+	for (i=0; i < nResults; i++) {
+		px_eroded = Table.get(pxCount_eroded, i, final_table);
+		px_mask   = Table.get(pxCount_mask,   i, final_table);
+		minThr_mask = Table.get("MinThr", i, mask_table);
+		maxThr_mask = Table.get("MaxThr", i, mask_table);
+		
+		Table.set("MinThr_mask", i, minThr_mask);
+		Table.set("MaxThr_mask", i, maxThr_mask);
+		Table.set("Frac-of-eroded-mask-over-mask", i, px_eroded/px_mask, final_table);
+		Table.set("Filename",                      i, orig_name, final_table);
+		Table.set("ROI_ID",                        i, i, final_table);
+	}
+	
+	updateResults();
+	//Table.update(final_table);
+	
+	//close("Results_mask");
+	
+
+	//n_ROIs = roiManager("count");
+	
+	//nPixels_mask = measureNonZeroPixels(mask_name);
+	//nPixels_mask_eroded = measureNonZeroPixels(mask_eroded_name);
+	
+	//totalPixels = getWidth() * getHeight();
 	
 	// Generate Results table
 	// Arguments: (Column Name, Row Index, Value)
-	setResult("Filename",                      0, orig_name);
-	setResult("Total_Pixels",                  0, totalPixels);
-	setResult("nPixels_mask",                  0, nPixels_mask);
-	setResult("nPixels_mask_eroded",           0, nPixels_mask_eroded);
-	setResult("Frac-of-eroded-mask-over-mask", 0, nPixels_mask_eroded / nPixels_mask);
+	//setResult("Filename",                      0, orig_name);
+	//setResult("Total_Pixels",                  0, totalPixels);
+	//setResult("nPixels_mask",                  0, nPixels_mask);
+	//setResult("nPixels_mask_eroded",           0, nPixels_mask_eroded);
+	//setResult("Frac-of-eroded-mask-over-mask", 0, nPixels_mask_eroded / nPixels_mask);
 	
 	name_prob_erode = orig_name + "_p-" + ER_prob_threshold + "_e-" + n_erosions;
+	results_filename = name_prob_erode + ".csv";
 	
-	saveAs("Results", dir_csv_files + File.separator + name_prob_erode + ".csv");
+	saveAs("Results", dir_csv_files + File.separator + results_filename);
+
+	selectWindow("Results_mask");
+	run("Close");
+
 	
 	// fluorescence in greyscale; mask is cyan; eroded mask is magenta
 	run("Merge Channels...", "c4=&fl_8bit_name c5=&mask_name c6=&mask_eroded_name create keep ignore");
